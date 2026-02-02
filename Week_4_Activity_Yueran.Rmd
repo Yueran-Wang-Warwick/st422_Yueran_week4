@@ -1,0 +1,196 @@
+---
+title: "ST422 Week 4 Activity 2: Client Report"
+author: '2201370'
+date: "2026-02-02"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width  = 7,
+  fig.height = 4.5
+)
+```
+
+
+```{r load-packages}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+```
+
+```{r load-data}
+df <- read.csv("data/raw/week4_dataset.csv", stringsAsFactors = FALSE)
+
+# Convert categorical variables to factors with explicit levels
+df <- df %>%
+  mutate(
+    group             = factor(group, levels = c("Control", "Treatment")),
+    customer_type     = factor(customer_type, levels = c("Existing", "New")),
+    discount_eligible = factor(discount_eligible, levels = c("No", "Yes")),
+    made_purchase_30d = factor(made_purchase_30d, levels = c("No", "Yes"))
+  )
+
+n_total   <- nrow(df)
+n_control <- sum(df$group == "Control")
+n_treat   <- sum(df$group == "Treatment")
+n_miss    <- sum(!complete.cases(df))
+aff_range <- range(df$area_affluence_score)
+
+# Create output directories and export processed data
+dir.create("data/processed", recursive = TRUE, showWarnings = FALSE)
+dir.create("outputs/tables",  recursive = TRUE, showWarnings = FALSE)
+dir.create("outputs/figures", recursive = TRUE, showWarnings = FALSE)
+write.csv(df, "data/processed/week4_dataset_processed.csv", row.names = FALSE)
+```
+
+```{r compute-key-rates}
+# Overall purchase rates by group
+rates_overall <- df %>%
+  group_by(group) %>%
+  summarise(
+    n       = n(),
+    n_yes   = sum(made_purchase_30d == "Yes"),
+    rate    = n_yes / n,
+    .groups = "drop"
+  )
+
+ctrl_rate <- rates_overall %>% filter(group == "Control") %>% pull(rate)
+trt_rate  <- rates_overall %>% filter(group == "Treatment") %>% pull(rate)
+rate_diff <- trt_rate - ctrl_rate
+
+# Subgroup purchase rates by customer type
+rates_subgroup <- df %>%
+  group_by(group, customer_type) %>%
+  summarise(
+    n       = n(),
+    n_yes   = sum(made_purchase_30d == "Yes"),
+    rate    = n_yes / n,
+    .groups = "drop"
+  )
+
+# Baseline summary statistics for inline use
+ctrl_df <- df %>% filter(group == "Control")
+trt_df  <- df %>% filter(group == "Treatment")
+
+ctrl_age_mean <- mean(ctrl_df$customer_age)
+trt_age_mean  <- mean(trt_df$customer_age)
+ctrl_aov_mean <- mean(ctrl_df$avg_order_value_gbp)
+trt_aov_mean  <- mean(trt_df$avg_order_value_gbp)
+
+ctrl_new_pct <- 100 * sum(ctrl_df$customer_type == "New") / n_control
+trt_new_pct  <- 100 * sum(trt_df$customer_type == "New") / n_treat
+
+ctrl_disc_pct <- 100 * sum(ctrl_df$discount_eligible == "Yes") / n_control
+trt_disc_pct  <- 100 * sum(trt_df$discount_eligible == "Yes") / n_treat
+```
+
+### Introduction
+
+This report provides an initial, plain-language assessment of whether your dataset supports a clear and defensible message that could be communicated to a general audience. At this stage we focus on describing what the data show and how confident we can be in that description, rather than applying complex models. In particular:
+
+- (i) Summarise who is in the dataset.
+- (ii) Compare the two groups on the information available.
+- (iii) Highlight any issues that could make a public-facing narrative misleading without further checks.
+
+### Client Brief
+
+You asked us to assess whether the dataset supports a clear message that you can stand behind publicly. In practical terms, you want to know whether the pattern is relevant to your decisions, consistent enough to tell a clear story, and not easily explained by straightforward problems such as the two groups being very different customers, missing information, or changes in how the outcome was defined or recorded.
+
+### Data Description
+
+The dataset contains **`r n_total`** customer records split into a **Control** group (`r n_control` customers) and a **Treatment** group (`r n_treat` customers). The groups represent whether a customer was included in a marketing intervention (Treatment) or not (Control).
+
+For each customer we have background information: age, customer type (New or Existing), average order value (GBP), number of orders in the last 90 days, website sessions in the last 30 days, discount eligibility, and an area-level affluence score. The outcome of interest is whether the customer **made at least one purchase within 30 days** after the intervention reference point.
+
+There are **`r n_miss`** records with missing values in the dataset. We note that the area affluence score ranges from `r aff_range[1]` to `r aff_range[2]` in this extract, whereas the documented range is 1 to 60; the lower end of the scale is not represented, which may reflect the geographic coverage of this customer sample.
+
+### Baseline Summary of Data Characteristics
+
+Before making any claim about differences in purchase rates, we first check whether the two groups look broadly similar on the information available. If one group is younger, spends more, or differs in other important ways, then a difference in purchase rates might reflect those pre-existing differences rather than the effect of the marketing intervention.
+
+```{r table1}
+source("src/01_table1.R")
+table1_styled
+```
+
+**Interpretation:** The two groups look broadly similar across all recorded characteristics. Age, average order value, order frequency, web activity, discount eligibility, and area affluence score all show only minor differences between Control and Treatment. The most notable difference is a slightly higher proportion of New customers in the Treatment group (`r sprintf("%.1f%%", trt_new_pct)` vs `r sprintf("%.1f%%", ctrl_new_pct)`), which should be kept in mind when interpreting purchase rates. Overall, there is no single large imbalance that would obviously explain a difference in outcomes.
+
+### Claim
+
+In this dataset, the Treatment group has a modestly higher 30-day purchase rate (`r sprintf("%.1f%%", trt_rate * 100)`) than the Control group (`r sprintf("%.1f%%", ctrl_rate * 100)`). The baseline summaries show the two groups are broadly comparable on recorded characteristics, so the difference is not easily explained by a single obvious imbalance. However, the gap is relatively small (approximately `r round(rate_diff * 100)` percentage points), the sample size is limited, and the intervention assignment rules are not documented, so this should be treated as an **initial signal worth investigating further**, rather than a confirmed effect.
+
+### Data and Approach
+
+We used a simple, transparent approach: 
+
+- a baseline summary table to describe who is in each group.
+
+- a chart comparing the 30-day purchase rate by group to show the main pattern.
+
+- a second chart breaking down purchase rates by customer type (New vs Existing) to check whether the pattern is consistent across different kinds of customers. We have not applied complex models at this stage, the aim is clarity and defensible description.
+
+### Evidence
+
+#### Table 1 — Interpretation
+
+The baseline summary table (Section 4) confirms that the two groups are well-matched on available characteristics. Customers in both groups have similar ages (Control: `r sprintf("%.1f", ctrl_age_mean)` years, Treatment: `r sprintf("%.1f", trt_age_mean)` years), similar average order values (approximately £`r round(ctrl_aov_mean)` and £`r round(trt_aov_mean)` respectively), similar ordering and browsing behaviour, and similar area affluence scores. Discount eligibility is also comparable (`r sprintf("%.1f%%", ctrl_disc_pct)` vs `r sprintf("%.1f%%", trt_disc_pct)`). The only moderately noticeable difference is the share of New customers (`r sprintf("%.1f%%", ctrl_new_pct)` in Control vs `r sprintf("%.1f%%", trt_new_pct)` in Treatment). This balance check supports the credibility of comparing outcomes between the two groups, though it only covers recorded variables.
+
+#### Visualisation 1: Purchase Rate by Group
+
+```{r viz1-purchase-rate}
+source("src/02_viz1_purchase_rate.R")
+print(p1)
+```
+
+```{r viz1-narrative}
+# Pull numbers for inline narrative
+ctrl_n_yes <- rates_overall %>% filter(group == "Control") %>% pull(n_yes)
+ctrl_n     <- rates_overall %>% filter(group == "Control") %>% pull(n)
+trt_n_yes  <- rates_overall %>% filter(group == "Treatment") %>% pull(n_yes)
+trt_n      <- rates_overall %>% filter(group == "Treatment") %>% pull(n)
+```
+
+**Interpretation:** The Treatment group shows a 30-day purchase rate of `r sprintf("%.1f%%", trt_rate * 100)` (`r trt_n_yes` out of `r trt_n` customers), compared with `r sprintf("%.1f%%", ctrl_rate * 100)` (`r ctrl_n_yes` out of `r ctrl_n`) in the Control group. This is a difference of roughly `r round(rate_diff * 100)` percentage points. The direction of the difference is consistent with a possible positive effect of the marketing intervention, but the gap is modest relative to the sample size and could plausibly arise from chance or from differences in characteristics not captured in the data.
+
+#### Visualisation 2: Purchase Rate by Customer Type and Group
+
+```{r viz2-customer-type}
+source("src/03_viz2_customer_type.R")
+print(p2)
+```
+
+```{r viz2-narrative}
+# Pull subgroup numbers for inline use
+exist_ctrl <- rates_subgroup %>% filter(group == "Control", customer_type == "Existing")
+exist_trt  <- rates_subgroup %>% filter(group == "Treatment", customer_type == "Existing")
+new_ctrl   <- rates_subgroup %>% filter(group == "Control", customer_type == "New")
+new_trt    <- rates_subgroup %>% filter(group == "Treatment", customer_type == "New")
+```
+
+**Interpretation:** When we break down purchase rates by customer type, the Treatment advantage is more pronounced among Existing customers: `r sprintf("%.1f%%", exist_trt$rate * 100)` of Existing customers in the Treatment group purchased within 30 days, compared with `r sprintf("%.1f%%", exist_ctrl$rate * 100)` in the Control group (a gap of approximately `r round((exist_trt$rate - exist_ctrl$rate) * 100)` percentage points). Among New customers the direction is similar — Treatment `r sprintf("%.1f%%", new_trt$rate * 100)` vs Control `r sprintf("%.1f%%", new_ctrl$rate * 100)` — but the gap is smaller (approximately `r round((new_trt$rate - new_ctrl$rate) * 100)` percentage points). This suggests that the pattern is present in both segments but may be somewhat stronger among customers who already have a relationship with the company. However, the subgroup sizes (Existing: `r exist_ctrl$n` Control, `r exist_trt$n` Treatment; New: `r new_ctrl$n` Control, `r new_trt$n` Treatment) are small enough that these within-segment differences should be interpreted cautiously.
+
+### Uncertainty and Limitations
+
+1. **Intervention assignment is not documented.** We do not know the rules used to assign customers to Treatment or Control. If assignment was not random — for example, if more engaged or more recently acquired customers were preferentially assigned to the intervention — then the observed difference in purchase rates could partly or fully reflect pre-existing differences rather than the effect of the intervention. This is the most important limitation: without clarity on assignment, we cannot confidently attribute the pattern to the intervention itself.
+
+2. **Outcome and variable definitions are provisional.** The staff member who prepared the data extract has left the company and no handover notes were provided. Key definitions — including the exact time window for `made_purchase_30d`, the classification rule for New vs Existing customers, and whether `discount_eligible` reflects eligibility or actual use — have not been confirmed against source systems. If any of these definitions are inconsistent or differ between groups, the apparent pattern could be partly an artefact of how the data was constructed rather than a real difference in customer behaviour.
+
+3. **The sample size limits the precision of the comparison.** With `r n_total` customers and a roughly `r round(rate_diff * 100)`-percentage-point difference in purchase rates, the observed gap could plausibly arise from natural variation alone. A larger dataset or a more detailed follow-up analysis would help clarify whether this difference is reliable. At this stage, the pattern is suggestive but not strong enough to rule out chance as an explanation.
+
+### Recommendation and Next Steps
+
+Treat the observed pattern as a credible early signal that the marketing intervention may be associated with a higher 30-day purchase rate, particularly among Existing customers. Before communicating this externally or making resource decisions based on it, we recommend the following steps:
+
+1. **Confirm the intervention assignment rules.** Clarify how customers were assigned to Treatment and Control. If assignment was not random, identify the criteria used so that we can assess and adjust for potential selection bias.
+
+2. **Verify key data definitions.** Confirm the outcome window anchor date, the New/Existing classification rule, and the meaning of discount eligibility against the source systems. This will ensure the comparison is valid.
+
+3. **Proceed to a more detailed analysis.** Once definitions are confirmed, a more rigorous analysis — including testing the reliability of the purchase-rate difference and accounting for relevant customer characteristics — would provide a stronger basis for decision-making and public-facing communication.
